@@ -206,12 +206,13 @@ public sealed class Wail2banTestRules : CollectionBase {
     $script:Policy.Rules.IgnoreAdd = $true
     Assert-Throws { & $script:ActualAddFirewall '203.0.113.20' ($now.AddMinutes(5)) } 'adapter refuses unconfirmed addition'
 
-    $script:Tick = 0; $script:MaintenanceTicks = @(); $script:Timeouts = @(); $script:PublishedStates = @(); $script:Unregistered = $false
+    $script:Tick = 0; $script:MaintenanceTicks = @(); $script:ControlTicks = @(); $script:Timeouts = @(); $script:PublishedStates = @(); $script:Unregistered = $false
     function Get-Wail2banMonotonicSeconds { return $script:Tick }
     function Get-Wail2banUtcNow { return $now.AddSeconds($script:Tick) }
     function Register-WmiEvent { param($Query,$SourceIdentifier,$ErrorAction); return $null }
     function Unregister-Event { param($SourceIdentifier,$ErrorAction); $script:Unregistered = $true }
     function Invoke-Wail2banMaintenance { param($State,$NowUtc); $script:MaintenanceTicks += $script:Tick }
+    function Invoke-Wail2banControlQueue { param($State,$Root,$NowUtc); $script:ControlTicks += $script:Tick }
     function Publish-Wail2banStatus { param($State,$NowUtc,$Root); $script:PublishedStates += $State.Status }
     function Wait-Event {
         param($SourceIdentifier,$Timeout,$ErrorAction)
@@ -225,6 +226,7 @@ public sealed class Wail2banTestRules : CollectionBase {
     $settings = [pscustomobject]@{Events=@([pscustomobject]@{EventId=4625;Channel='Security'})}
     Assert-Throws { Start-Wail2banLoop $state $settings $tempRoot } 'loop exits on listener failure'
     Assert-True (($script:MaintenanceTicks -join ',') -eq '0,5,10' -and $state.Counters.Processed -eq 12) 'maintenance runs on schedule during continuous event load'
+    Assert-True (($script:ControlTicks -join ',') -eq '0,5,10') 'control queue runs on schedule during continuous event load'
     Assert-True (@($script:Timeouts | Where-Object { $_ -lt 1 -or $_ -gt 5 }).Count -eq 0) 'event wait timeout bounded by five seconds'
     Assert-True ($script:Unregistered -and $script:PublishedStates[-1] -eq 'Stopped') 'listener shutdown unsubscribes and publishes stopped'
 

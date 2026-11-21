@@ -195,3 +195,25 @@ Launcher `.bat` và task XML cũ chưa được nâng cấp trong giai đoạn n
 **Giới hạn nghiệm thu:** kiểm thử mô phỏng không thay thế xác minh Event Log và Windows Firewall thật trên server đích. Việc triển khai server là bước riêng.
 
 Mã nguồn gốc dựa trên Wail2ban của glasnt; xem `LICENCE.md`.
+
+### Gói sao chép lên server
+
+Thư mục [`script`](script/README.md) chứa đầy đủ mã chạy, cấu hình mẫu và hướng dẫn tiếng Việt. Sao chép toàn bộ thư mục này lên Windows Server. Dùng `start_wail2ban.bat` để chạy bảo vệ và `start_monitor.bat` để theo dõi; cả hai dùng vị trí tệp để xác định đường dẫn. Gói không cài dịch vụ hoặc tự chạy khi khởi động máy.
+
+### Kiểm tra whitelist đang được áp dụng
+
+Monitor terminal và HTML hiển thị riêng **Whitelist đã nạp** (IP/CIDR trong cấu hình) và **IP máy chủ tự miễn chặn**, kèm đường dẫn cấu hình và thời điểm nạp UTC. Danh sách này lấy từ tiến trình bảo vệ đang chạy; chỉnh file INI không tự áp dụng cho tiến trình hiện tại. Sau khi sửa cấu hình, cần dừng và chạy lại chương trình bảo vệ trong đợt quản trị được cho phép, rồi đối chiếu thời điểm nạp và heartbeat.
+
+Cú pháp đúng là `IP = ghi chú` hoặc `CIDR = ghi chú`, không đặt dấu backtick hoặc dấu nháy quanh địa chỉ. Dùng địa chỉ IP nguồn mà server thực tế ghi nhận; nếu đi qua NAT, địa chỉ này có thể khác IP nội bộ của máy quản trị. Snapshot từ phiên bản cũ sẽ báo chưa có dữ liệu whitelist; cần cập nhật chương trình bảo vệ để xuất danh sách này.
+
+### Menu CMD quản trị
+
+Chạy `admin_wail2ban.bat` để mở menu tiếng Việt. Menu có 13 lựa chọn: xem trạng thái, whitelist đã nạp/đang lưu, IP bị chặn, gỡ một IP hoặc tất cả, thêm/xóa whitelist, mở cấu hình, xem 100 dòng nhật ký, mở HTML và khởi động/dừng/chạy lại bảo vệ. Lựa chọn `0` chỉ thoát menu, không dừng bảo vệ.
+
+Các thao tác thay đổi trong menu yêu cầu quyền quản trị và nhập đúng `tôi đồng ý`. Menu không tự nâng quyền hoặc bỏ qua Execution Policy. Các lệnh CLI quản trị cũ giữ cách gọi hiện có, dùng cùng cơ chế kiểm tra quyền, khóa và điều phối thay đổi với tiến trình đang chạy; không thêm câu hỏi tương tác vào CLI.
+
+Khi thêm/xóa whitelist, menu kiểm tra địa chỉ và toàn bộ cấu hình, sao lưu nguyên byte, phát hiện file bị sửa ngoài rồi ghi nguyên tử. Chỉ mục `[Whitelist]` được sửa; cấu hình sự kiện và chú thích khác được giữ. Cấu hình mới chưa áp dụng cho đến khi quản trị viên chủ động chạy lại bảo vệ. Sửa bằng Notepad là chỉnh thủ công, không có bảo đảm sao lưu/kiểm tra của trình sửa whitelist.
+
+Tiến trình mới chạy ẩn và xuất snapshot có mã phiên. Khóa dùng chung trên máy ngăn chạy nhiều bản bảo vệ. Lệnh gỡ chặn khi đang chạy được gửi về chính tiến trình để đồng bộ bộ nhớ và lịch sử; nếu chỉ gỡ được một phần, menu liệt kê IP thành công và thất bại. Dừng/chạy lại dùng hàng đợi có phản hồi, không cưỡng bức kết thúc PID. Nếu quá thời gian chờ, kết quả là chưa xác nhận; không gửi lại hoặc khởi động thêm khi chưa kiểm tra trạng thái. Khi đã dừng, rule hiện có vẫn được giữ nhưng không còn tự gỡ ban hết hạn.
+
+Bản cũ chưa hỗ trợ điều khiển phải được dừng thủ công trong cửa sổ đang chạy trước khi cập nhật. Giữ cấu hình và lịch sử server, sao chép mã mới từ gói `script`, rồi mở menu bằng Run as administrator. Chế độ này không cài dịch vụ hoặc tự khởi động cùng máy. Thư mục `runtime/control` giữ yêu cầu, nhật ký chống thực thi lặp và phản hồi để đối chiếu mã yêu cầu.

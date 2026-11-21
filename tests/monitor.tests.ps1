@@ -34,6 +34,53 @@ try {
     Assert-Monitor ($html.Contains('http-equiv="refresh" content="5"')) 'Refresh interval'
     Assert-Monitor ($html.Contains('setInterval(update,1000)') -and $html.Contains('Date.now()-stamp>30000')) 'Independent stale detection'
     Assert-Monitor ($html -notmatch '(?i)(?:src|href)\s*=\s*["'']https?://' -and $html -notmatch '(?i)fetch\s*\(') 'No external resources'
+    $legacyText = Get-Wail2banMonitorText $loaded -NowUtc $now
+    Assert-Monitor ($legacyText.Contains('Snapshot cũ chưa có dữ liệu whitelist') -and -not $legacyText.Contains('Whitelist đã nạp: 0')) 'Legacy snapshot does not claim empty whitelist'
+    Assert-Monitor ($html.Contains('Snapshot cũ chưa có dữ liệu whitelist')) 'Legacy whitelist explained in HTML'
+    $configPath = Join-Path $temporaryRoot 'config.ini'
+    [io.file]::WriteAllText($configPath, "[Whitelist]`n198.51.100.99 = edited on disk")
+    $snapshot | Add-Member -MemberType NoteProperty -Name Whitelist -Value @('203.0.113.9','198.51.100.0/24')
+    $snapshot | Add-Member -MemberType NoteProperty -Name SelfList -Value @('127.0.0.1','192.0.2.20')
+    $snapshot | Add-Member -MemberType NoteProperty -Name ConfigPath -Value $configPath
+    $snapshot | Add-Member -MemberType NoteProperty -Name ConfigLoadedAtUtc -Value $now.ToString('o')
+    $whitelistText = Get-Wail2banMonitorText $snapshot -NowUtc $now
+    Assert-Monitor ($whitelistText.Contains('Whitelist đã nạp: 2') -and $whitelistText.Contains('198.51.100.0/24')) 'Runtime configured whitelist displayed'
+    Assert-Monitor ($whitelistText.Contains('IP máy chủ tự miễn chặn: 2') -and $whitelistText.Contains('192.0.2.20')) 'Self addresses displayed separately'
+    Assert-Monitor ($whitelistText.Contains($configPath) -and $whitelistText.Contains($now.ToString('o'))) 'Configuration path and loaded time displayed'
+    Assert-Monitor ($whitelistText.Contains('Sửa tệp INI cần chạy lại chương trình bảo vệ')) 'Reload instruction displayed'
+    Assert-Monitor (-not $whitelistText.Contains('198.51.100.99')) 'Monitor does not read current INI as applied configuration'
+    Write-Wail2banSnapshot -Snapshot $snapshot -Path $jsonPath
+    $monitorPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'wail2ban_monitor.ps1'
+    $onceText = (& $monitorPath -StatusPath $jsonPath -Once) -join "`n"
+    Assert-Monitor ($onceText.Contains('Whitelist đã nạp: 2') -and $onceText.Contains('203.0.113.9')) 'Terminal entrypoint shows loaded whitelist'
+    Write-Wail2banHtml -Snapshot $snapshot -Path $htmlPath
+    $html = [io.file]::ReadAllText($htmlPath)
+    Assert-Monitor ($html.Contains('Whitelist đã nạp: 2') -and $html.Contains('198.51.100.0/24')) 'Whitelist in HTML'
+    Assert-Monitor ($html.Contains('IP máy chủ tự miễn chặn: 2') -and $html.Contains($now.ToString('o'))) 'Self list and loaded time in HTML'
+    $snapshot.Whitelist = @(); $snapshot.SelfList = @()
+    $emptyWhitelistText = Get-Wail2banMonitorText $snapshot -NowUtc $now
+    Assert-Monitor ($emptyWhitelistText.Contains('Whitelist đã nạp: 0') -and $emptyWhitelistText.Contains('Chưa cấu hình whitelist bổ sung.')) 'Empty configured whitelist explicit'
+    Assert-Monitor ($emptyWhitelistText.Contains('IP máy chủ tự miễn chặn: 0')) 'Empty self list explicit'
+    Write-Wail2banHtml -Snapshot $snapshot -Path $htmlPath
+    Assert-Monitor ([io.file]::ReadAllText($htmlPath).Contains('Chưa cấu hình whitelist bổ sung.')) 'Empty whitelist HTML'
+    $snapshot.Whitelist = @('<script>alert(1)</script>')
+    $snapshot.SelfList = @('<img src=x onerror=alert(1)>')
+    $snapshot.ConfigPath = '<b>config</b>'
+    $snapshot.ConfigLoadedAtUtc = $null
+    Write-Wail2banHtml -Snapshot $snapshot -Path $htmlPath
+    $html = [io.file]::ReadAllText($htmlPath)
+    Assert-Monitor ($html.Contains('&lt;script&gt;') -and -not $html.Contains('<script>alert(1)')) 'Whitelist entry HTML escaped'
+    Assert-Monitor ($html.Contains('&lt;img') -and -not $html.Contains('<img')) 'Self list entry HTML escaped'
+    Assert-Monitor ($html.Contains('&lt;b&gt;config&lt;/b&gt;') -and -not $html.Contains('<b>config</b>')) 'Configuration path HTML escaped'
+    Assert-Monitor ($html.Contains((ConvertTo-Wail2banHtmlText 'không xác định'))) 'Unknown loaded time explained'
+    $snapshot.Whitelist = @("203.0.113.9$([char]27)[31m")
+    $snapshot.SelfList = @("127.0.0.1`nforged line")
+    $snapshot.ConfigPath = "C:\config$([char]27)[31m.ini"
+    $safeText = Get-Wail2banMonitorText $snapshot -NowUtc $now
+    Assert-Monitor ($safeText -notmatch [string][char]27) 'Whitelist and path terminal controls removed'
+    Assert-Monitor ($safeText.Contains('- 127.0.0.1 forged line')) 'Self list terminal newline removed'
+    $snapshot.Whitelist = @('203.0.113.9'); $snapshot.SelfList = @('127.0.0.1')
+    $snapshot.ConfigPath = $configPath; $snapshot.ConfigLoadedAtUtc = $now.ToString('o')
     $snapshot.Status = 'Degraded'
     Assert-Monitor ((Get-Wail2banMonitorStatus $snapshot -NowUtc $now) -eq 'Có lỗi') 'Degraded status'
     $snapshot.Status = 'Stopped'

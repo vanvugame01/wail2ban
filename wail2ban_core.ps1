@@ -36,13 +36,16 @@ function Test-Wail2banWhitelist {
 }
 
 function New-Wail2banState {
-    param([datetime]$NowUtc = [datetime]::UtcNow, [string[]]$Whitelist = @(), [string[]]$SelfList = @(), [string]$LogPath, [string]$HistoryPath)
+    param([datetime]$NowUtc = [datetime]::UtcNow, [string[]]$Whitelist = @(), [string[]]$SelfList = @(), [string]$LogPath, [string]$HistoryPath,
+        [string]$ConfigPath, [datetime]$ConfigLoadedAtUtc = $NowUtc)
     return [pscustomobject]@{
         StartedAtUtc = $NowUtc.ToUniversalTime(); InstanceId = [guid]::NewGuid().ToString()
         Attempts = @{}; Seen = @{}; BanCounts = @{}; Whitelist = $Whitelist; SelfList = $SelfList
+        ConfigPath = $ConfigPath; ConfigLoadedAtUtc = $ConfigLoadedAtUtc.ToUniversalTime()
         Counters = [pscustomobject]@{Processed = 0; Skipped = 0; Banned = 0; Released = 0}
         RecentIssues = @(); Faults = @{}; LogPath = $LogPath; HistoryPath = $HistoryPath
         Bans = @(); FirewallReadSucceeded = $false; Status = 'Running'
+        ControlProtocolVersion = 0; ControlRoot = ''; StopRequested = $false; StopRequest = $null
     }
 }
 
@@ -216,6 +219,9 @@ function New-Wail2banSnapshot {
         SchemaVersion = 1; Hostname = [environment]::MachineName; ProcessId = $PID; InstanceId = $State.InstanceId
         StartedAtUtc = $State.StartedAtUtc.ToString('o'); HeartbeatUtc = $NowUtc.ToUniversalTime().ToString('o'); Status = $status
         Counters = $State.Counters; FirewallReadSucceeded = $State.FirewallReadSucceeded
+        Whitelist = @($State.Whitelist); SelfList = @($State.SelfList)
+        ConfigPath = $State.ConfigPath; ConfigLoadedAtUtc = $State.ConfigLoadedAtUtc.ToString('o')
+        ControlProtocolVersion = $State.ControlProtocolVersion; ControlRoot = $State.ControlRoot
         Bans = @($State.Bans | ForEach-Object { [pscustomobject]@{Ip = $_.Ip; ExpiresAtUtc = if ($null -ne $_.ExpiresAtUtc) { $_.ExpiresAtUtc.ToUniversalTime().ToString('o') } else { $null }} })
         RecentIssues = @($State.RecentIssues)
     }

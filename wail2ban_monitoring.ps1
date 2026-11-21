@@ -84,6 +84,24 @@ function Get-Wail2banMonitorStatus {
     return 'Đang chạy'
 }
 
+function Get-Wail2banWhitelistView {
+    param([object]$Snapshot)
+    if ($null -eq $Snapshot.PSObject.Properties['Whitelist'] -or
+            $null -eq $Snapshot.PSObject.Properties['SelfList']) { return $null }
+    $loadedAt = ConvertTo-Wail2banUtc $Snapshot.ConfigLoadedAtUtc
+    return [pscustomobject]@{
+        Whitelist = @($Snapshot.Whitelist | Where-Object { $null -ne $_ })
+        SelfList = @($Snapshot.SelfList | Where-Object { $null -ne $_ })
+        ConfigPath = if ([string]::IsNullOrWhiteSpace([string]$Snapshot.ConfigPath)) { 'không xác định' } else { [string]$Snapshot.ConfigPath }
+        LoadedAtUtc = if ($null -eq $loadedAt) { 'không xác định' } else { $loadedAt.ToString('o') }
+    }
+}
+
+function ConvertTo-Wail2banTerminalText {
+    param([object]$Value)
+    return ([string]$Value) -replace '[\x00-\x1F\x7F]', ' '
+}
+
 function Get-Wail2banMonitorText {
     param([object]$Snapshot, [datetime]$NowUtc = [datetime]::UtcNow)
     $lines = New-Object 'System.Collections.Generic.List[string]'
@@ -98,6 +116,19 @@ function Get-Wail2banMonitorText {
     $lines.Add('Heartbeat chỉ xác nhận vòng xử lý còn hoạt động.')
     $lines.Add(('Từ lúc khởi động: xử lý {0} | bỏ qua {1} | chặn {2} | gỡ {3}' -f
             $Snapshot.Counters.Processed,$Snapshot.Counters.Skipped,$Snapshot.Counters.Banned,$Snapshot.Counters.Released))
+    $access = Get-Wail2banWhitelistView $Snapshot
+    if ($null -eq $access) {
+        $lines.Add('Snapshot cũ chưa có dữ liệu whitelist; cập nhật và chạy lại chương trình bảo vệ.')
+    } else {
+        $lines.Add(('Tệp cấu hình: {0}' -f (ConvertTo-Wail2banTerminalText $access.ConfigPath)))
+        $lines.Add(('Nạp lúc UTC: {0}' -f $access.LoadedAtUtc))
+        $lines.Add(('Whitelist đã nạp: {0}' -f $access.Whitelist.Count))
+        foreach ($entry in $access.Whitelist) { $lines.Add(('- {0}' -f (ConvertTo-Wail2banTerminalText $entry))) }
+        if ($access.Whitelist.Count -eq 0) { $lines.Add('Chưa cấu hình whitelist bổ sung.') }
+        $lines.Add(('IP máy chủ tự miễn chặn: {0}' -f $access.SelfList.Count))
+        foreach ($entry in $access.SelfList) { $lines.Add(('- {0}' -f (ConvertTo-Wail2banTerminalText $entry))) }
+        $lines.Add('Đây là cấu hình tiến trình đang sử dụng. Sửa tệp INI cần chạy lại chương trình bảo vệ để nạp lại.')
+    }
     if (-not $Snapshot.FirewallReadSucceeded) { $lines.Add('IP đang bị chặn: không xác định (không đọc được firewall).') }
     else {
         $lines.Add(('IP đang bị chặn: {0}' -f @($Snapshot.Bans).Count))
@@ -148,6 +179,21 @@ function Write-Wail2banHtml {
                     (ConvertTo-Wail2banHtmlText $issue.Message)))
         }
         if ($issues.Count -eq 0) { $issues.Add('<tr><td colspan="3">Không có.</td></tr>') }
+        $access = Get-Wail2banWhitelistView $Snapshot
+        if ($null -eq $access) {
+            $accessDetails = '<h2>Whitelist đã nạp</h2><p>Snapshot cũ chưa có dữ liệu whitelist; cập nhật và chạy lại chương trình bảo vệ.</p>'
+        } else {
+            $whitelistItems = @($access.Whitelist | ForEach-Object { '<li>{0}</li>' -f (ConvertTo-Wail2banHtmlText $_) })
+            $selfItems = @($access.SelfList | ForEach-Object { '<li>{0}</li>' -f (ConvertTo-Wail2banHtmlText $_) })
+            $emptyWhitelist = if ($access.Whitelist.Count -eq 0) { '<p>Chưa cấu hình whitelist bổ sung.</p>' } else { '' }
+            $accessDetails = @"
+<h2>Whitelist đã nạp: $($access.Whitelist.Count)</h2>
+<p>Tệp cấu hình: $(ConvertTo-Wail2banHtmlText $access.ConfigPath)<br>Nạp lúc UTC: $(ConvertTo-Wail2banHtmlText $access.LoadedAtUtc)</p>
+$emptyWhitelist<ul>$($whitelistItems -join '')</ul>
+<h3>IP máy chủ tự miễn chặn: $($access.SelfList.Count)</h3><ul>$($selfItems -join '')</ul>
+<p class="note">Đây là cấu hình tiến trình đang sử dụng. Sửa tệp INI cần chạy lại chương trình bảo vệ để nạp lại.</p>
+"@
+        }
         $details = @"
 <dl><dt>Máy</dt><dd>$(ConvertTo-Wail2banHtmlText $Snapshot.Hostname)</dd>
 <dt>PID / phiên chạy</dt><dd>$(ConvertTo-Wail2banHtmlText $Snapshot.ProcessId) / $(ConvertTo-Wail2banHtmlText $Snapshot.InstanceId)</dd>
@@ -155,6 +201,7 @@ function Write-Wail2banHtml {
 <dt>Heartbeat UTC</dt><dd>$heartbeat</dd></dl>
 <h2>Bộ đếm từ lúc khởi động</h2>
 <p>Đã xử lý: $(ConvertTo-Wail2banHtmlText $Snapshot.Counters.Processed) · Bỏ qua: $(ConvertTo-Wail2banHtmlText $Snapshot.Counters.Skipped) · Chặn thành công: $(ConvertTo-Wail2banHtmlText $Snapshot.Counters.Banned) · Gỡ thành công: $(ConvertTo-Wail2banHtmlText $Snapshot.Counters.Released)</p>
+$accessDetails
 <h2>IP đang bị chặn: $banCount</h2><table><thead><tr><th>IP</th><th>Hết hạn UTC</th></tr></thead><tbody>$($rows -join '')</tbody></table>
 <h2>20 lỗi và cảnh báo gần nhất</h2><table><thead><tr><th>UTC</th><th>Mức</th><th>Nội dung</th></tr></thead><tbody>$($issues -join '')</tbody></table>
 "@

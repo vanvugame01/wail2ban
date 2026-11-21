@@ -1,5 +1,43 @@
 # Nhật ký cập nhật
 
+## 2026-11-21 — Dọn màn hình menu quản trị
+
+- Xóa màn hình trước khi vẽ menu và trước khi hiển thị nội dung lựa chọn, tránh nối kết quả cũ với menu mới.
+- Giữ thông báo lỗi nhập lựa chọn trên màn hình đến khi nhấn Enter. Chỉ xóa cửa sổ tương tác, không chèn mã điều khiển khi chuyển hướng đầu ra.
+- Đồng bộ script quản trị trong gói server và mã SHA-256, tạo ZIP cập nhật riêng.
+
+## 2026-11-21 — Menu CMD quản trị và điều khiển an toàn
+
+- Thêm `admin_wail2ban.bat` và menu PowerShell tiếng Việt với 13 lựa chọn quản trị; thoát menu không dừng bảo vệ.
+- Menu xem được snapshot khi chưa nâng quyền. Thao tác thay đổi yêu cầu quyền quản trị và xác nhận đúng `tôi đồng ý`; không tự nâng quyền hoặc đổi Execution Policy.
+- Bổ sung trình thêm/xóa whitelist, giữ mã hóa/xuống dòng/chú thích và các mục khác, kiểm tra toàn bộ cấu hình, sao lưu nguyên byte và phát hiện chỉnh sửa ngoài trước khi thay thế nguyên tử.
+- Phân biệt whitelist đang lưu với snapshot đã nạp. Lưu không tự chạy lại bảo vệ hoặc gỡ rule hiện có.
+- Bổ sung khóa bảo vệ dùng chung trên máy, phát hiện phiên cũ, khởi động ẩn và xác nhận theo PID/mã phiên. Dừng có kiểm soát, không cưỡng bức kết thúc tiến trình; chạy lại chỉ sau xác nhận dừng.
+- Hàng đợi điều khiển theo mã yêu cầu và phiên đích hỗ trợ gỡ một IP, gỡ tất cả và dừng; có dấu chống thực thi lặp và phản hồi để đối chiếu.
+- Gỡ chặn khi đang chạy cập nhật cùng bộ nhớ và lịch sử. Kết quả một phần giữ lịch sử IP chưa gỡ được và hiển thị danh sách tương ứng.
+- Thêm bộ kiểm thử cho menu, trình sửa INI và điều khiển; các thao tác hệ thống đều dùng mock hoặc dữ liệu tạm, không tác động firewall/server thật.
+- Đồng bộ thư mục `script`, mã SHA-256 và gói ZIP mới; giữ bản ZIP cũ. Không cài Scheduled Task hoặc dịch vụ.
+- Kết quả kiểm thử đầy đủ trên Windows PowerShell 5.1.26100.9818: lõi 57, monitor 50, tích hợp 7, trình sửa cấu hình 56, điều khiển 38 và menu 39 kiểm tra đều đạt; 15 script không lỗi cú pháp.
+- Đã chạy BAT thật với `-Help` và chọn `0` để thoát; vòng điều khiển/khởi động/dừng và firewall được kiểm tra bằng mock. Rà soát độc lập xác nhận sửa nhận diện tiến trình legacy và xung đột atomic replace khi lưu INI; thay đổi ngoài được giữ trong backup thực tế và khôi phục nếu an toàn, nếu xung đột tiếp thì báo đường dẫn phục hồi thủ công.
+
+## 2026-11-21 — Hiển thị whitelist đã nạp trên monitor
+
+- Snapshot bổ sung whitelist đang được tiến trình sử dụng, danh sách IP máy chủ tự miễn chặn, đường dẫn cấu hình và thời điểm nạp UTC. Giữ khả năng đọc snapshot cũ.
+- Monitor terminal và HTML phân biệt whitelist rỗng với snapshot phiên bản cũ chưa có dữ liệu whitelist; không đọc file INI trực tiếp để tránh báo nhầm cấu hình chưa áp dụng.
+- Thông báo lỗi cấu hình whitelist chỉ rõ số dòng và cú pháp, nhắc bỏ dấu backtick/dấu nháy. Cập nhật chú thích cấu hình mẫu để tránh sao chép nhầm dấu định dạng.
+- Đồng bộ gói `script` và mã SHA-256 sau thay đổi; hướng dẫn giữ cấu hình và lịch sử hiện có khi cập nhật server.
+- Kiểm thử mô phỏng cấu hình có backtick theo ảnh, cấu hình hợp lệ, chuyển dữ liệu từ cấu hình sang snapshot/monitor và sửa INI chưa nạp lại. Không thao tác server hoặc firewall thật.
+- Kết quả Windows PowerShell 5.1.26100.9818: 56 kiểm tra lõi, 50 assertion monitor, 7 ca tích hợp đạt; 9 script không lỗi cú pháp. Đã mở HTML mẫu bằng trình duyệt và rà soát độc lập phần tương thích snapshot cũ/escape HTML.
+
+## 2026-11-21 — Đóng gói thư mục script cho server
+
+- Thêm thư mục `script` chứa năm tệp PowerShell chạy thực tế, cấu hình mẫu và giấy phép; không kèm Git, kiểm thử, nhật ký hoặc dữ liệu chặn.
+- Thêm hai launcher `.bat` gọi Windows PowerShell 5.1 theo vị trí tệp, hỗ trợ đường dẫn có khoảng trắng và giữ tiến trình bảo vệ ở tiền cảnh.
+- Thêm hướng dẫn tiếng Việt về cấu hình whitelist, chạy, monitor, gỡ chặn và sao lưu/khôi phục. Giữ nguyên launcher và task XML cũ bên ngoài gói.
+- Bổ sung danh sách SHA-256 để đối chiếu tệp trong gói với mã nguồn và kiểm tra sau khi sao chép.
+- Kiểm tra thực tế: 7/7 tệp sao chép khớp mã nguồn, 10/10 mã SHA-256 đúng; hai launcher chạy được từ thư mục khác bằng các lệnh `-help`, `-config`, monitor `-Once` trên Windows PowerShell 5.1.
+- Chỉ đóng gói cục bộ; không kết nối server, không chạy bảo vệ thật, không sửa firewall và không cài tác vụ khởi động.
+
 ## 2026-11-21 — Giai đoạn 1: sửa lõi và bổ sung giám sát
 
 ### Thay đổi

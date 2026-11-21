@@ -2,3 +2,9 @@ runtime/
 public_html/
 wail2ban_log.log
 bannedIPLog.ini
+wail2ban_config.ini.backup-*.ini
+wail2ban_config.ini.wail2ban.lock
+wail2ban_config.ini.wail2ban-*.tmp
+wail2ban_config.ini.conflict-current-*.ini
+script/
+script*.zip

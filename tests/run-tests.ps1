@@ -7,7 +7,7 @@ if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -n
 }
 
 # Moi bo kiem thu chay trong tien trinh rieng de cach ly mock.
-$testFiles = @('core.tests.ps1', 'monitor.tests.ps1', 'integration.tests.ps1')
+$testFiles = @('core.tests.ps1', 'monitor.tests.ps1', 'integration.tests.ps1', 'configuration.tests.ps1', 'control.tests.ps1', 'admin.tests.ps1')
 foreach ($testFile in $testFiles) {
     $testPath = Join-Path $PSScriptRoot $testFile
     if (-not (Test-Path -LiteralPath $testPath)) { throw "Missing test suite: $testFile" }

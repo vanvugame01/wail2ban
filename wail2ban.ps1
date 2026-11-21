@@ -4,23 +4,28 @@
     [switch]$Jailbreak,
     [string]$Unban,
     [switch]$Help,
-    [switch]$LibraryOnly
+    [switch]$LibraryOnly,
+    [string]$ManagedInstanceId
 )
 
 . (Join-Path $PSScriptRoot 'wail2ban_core.ps1')
+. (Join-Path $PSScriptRoot 'wail2ban_monitoring.ps1')
+. (Join-Path $PSScriptRoot 'wail2ban_control.ps1')
 
 # Cac adapter IO duoc tach de kiem thu bang mock.
 function Get-Wail2banConfiguration {
     param([string]$Path)
-    $events = @(); $whitelist = @(); $section = ''
+    $events = @(); $whitelist = @(); $section = ''; $lineNumber = 0
     foreach ($rawLine in Get-Content -LiteralPath $Path -ErrorAction Stop) {
+        $lineNumber++
         $line = $rawLine.Trim()
         if (-not $line -or $line.StartsWith('#') -or $line.StartsWith(';')) { continue }
         if ($line -match '^\[(?<Section>[^\]]+)\]$') { $section = $Matches.Section; continue }
         if ($line -notmatch '^(?<Key>[^=]+)=(?<Value>.*)$') { throw 'Dòng cấu hình không hợp lệ.' }
         $key = $Matches.Key.Trim(); $value = $Matches.Value.Trim()
         if ($section -eq 'Whitelist') {
-            $null = Test-Wail2banWhitelist '0.0.0.0' @($key) @()
+            try { $null = Test-Wail2banWhitelist '0.0.0.0' @($key) @() }
+            catch { throw ('Whitelist không hợp lệ tại dòng {0}. Dùng IP = ghi chú hoặc CIDR = ghi chú; không đặt dấu backtick hoặc dấu nháy quanh địa chỉ.' -f $lineNumber) }
             $whitelist += $key
         } elseif ($section -in @('Security','Application','System')) {
             $eventId = 0
@@ -152,6 +157,8 @@ function Start-Wail2banLoop {
     $query = "SELECT * FROM __InstanceCreationEvent WHERE TargetInstance ISA 'Win32_NTLogEvent' AND (" + ($clauses -join ' OR ') + ')'
     $registered = $false
     $nextMaintenance = 0.0
+    $State.ControlRoot = [io.path]::GetFullPath($Root).TrimEnd('\')
+    $State.ControlProtocolVersion = 1
     try {
         $null = Register-WmiEvent -Query $query -SourceIdentifier $sinkName -ErrorAction Stop
         $registered = $true
@@ -160,6 +167,8 @@ function Start-Wail2banLoop {
             if ((Get-Wail2banMonotonicSeconds) -ge $nextMaintenance) {
                 $nextMaintenance = (Get-Wail2banMonotonicSeconds) + 5
                 $now = Get-Wail2banUtcNow
+                Invoke-Wail2banControlQueue $State $Root $now
+                if ($State.StopRequested) { break }
                 Invoke-Wail2banMaintenance $State $now
                 Publish-Wail2banStatus $State (Get-Wail2banUtcNow) $Root
             }
@@ -172,10 +181,20 @@ function Start-Wail2banLoop {
         Add-Wail2banIssue $State 'Listener dừng do lỗi; cần quản trị viên kiểm tra quyền và dịch vụ Event Log.' Error
         throw 'Wail2ban đã dừng do lỗi listener. Xem log và monitor.'
     } finally {
-        if ($registered) { Unregister-Event -SourceIdentifier $sinkName -ErrorAction SilentlyContinue }
+        if ($registered) {
+            try { Unregister-Event -SourceIdentifier $sinkName -ErrorAction Stop }
+            catch { $State.Faults['listener-cleanup']=$true; Add-Wail2banIssue $State 'Không xác nhận được việc hủy đăng ký sự kiện.' Error }
+        }
         Get-Event -ErrorAction SilentlyContinue | Where-Object { $_.SourceIdentifier -eq $sinkName } | Remove-Event -ErrorAction SilentlyContinue
         $State.Status = 'Stopped'
         Publish-Wail2banStatus $State (Get-Wail2banUtcNow) $Root
+        if ($null -ne $State.StopRequest) {
+            $result = if ($State.Faults.ContainsKey('monitor-write') -or $State.Faults.ContainsKey('listener-cleanup')) {
+                New-Wail2banControlResult 'Failed' 'Tiến trình đã rời vòng chạy nhưng chưa xác nhận đầy đủ dừng; kiểm tra trạng thái trước khi chạy lại.'
+            } else { New-Wail2banControlResult 'Completed' 'Đã dừng vòng bảo vệ và hủy đăng ký sự kiện; giữ các rule đang chặn.' }
+            try { Complete-Wail2banControlResponse $Root $State.StopRequest $result }
+            catch { Add-Wail2banIssue $State 'Không ghi được phản hồi dừng; quản trị viên cần kiểm tra trạng thái.' Error }
+        }
     }
 }
 
@@ -186,22 +205,26 @@ if ($Help) {
 }
 if ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5) { throw 'Cần Windows PowerShell 5.1 để chạy wail2ban.' }
 $settings = Get-Wail2banConfiguration (Join-Path $PSScriptRoot 'wail2ban_config.ini')
+$configurationLoadedAtUtc = [datetime]::UtcNow
 if ($Config) {
     [pscustomobject]@{CheckWindowSeconds = 120; CheckCount = 5; MaxBanSeconds = 7776000; Events = $settings.Events; Whitelist = $settings.Whitelist}
     return
 }
-$state = New-Wail2banState -Whitelist $settings.Whitelist -SelfList (Get-Wail2banSelfAddresses) -LogPath (Join-Path $PSScriptRoot 'wail2ban_log.log') -HistoryPath (Join-Path $PSScriptRoot 'bannedIPLog.ini')
-Read-Wail2banBanHistory $state
 if ($Jail) { Get-Wail2banFirewallRules; return }
 if ($Jailbreak -or $Unban) {
-    if ($Unban -and -not (ConvertTo-Wail2banIPv4 $Unban)) { throw 'IPv4 không hợp lệ.' }
-    $ipToRelease = if ($Unban) { ConvertTo-Wail2banIPv4 $Unban } else { $null }
-    foreach ($rule in @(Get-Wail2banFirewallRules)) {
-        if (-not $ipToRelease -or $rule.Ip -eq $ipToRelease) { Remove-Wail2banFirewallRule $rule.Ip; Write-Wail2banLog $state 'Action' ('Đã gỡ chặn IP {0} theo yêu cầu quản trị viên.' -f $rule.Ip) }
-    }
-    if ($ipToRelease) { $state.BanCounts.Remove($ipToRelease) } else { $state.BanCounts.Clear() }
-    Save-Wail2banBanHistory $state
+    $result = if ($Jailbreak) { Invoke-Wail2banManagedUnban -Root $PSScriptRoot -All } else { Invoke-Wail2banManagedUnban -Root $PSScriptRoot -Ip $Unban }
+    Write-Output $result
+    if (-not $result.Success) { throw 'Yêu cầu gỡ chặn chưa hoàn tất đầy đủ; xem kết quả và mã yêu cầu.' }
     return
 }
-. (Join-Path $PSScriptRoot 'wail2ban_monitoring.ps1')
-Start-Wail2banLoop $state $settings $PSScriptRoot
+if (-not (Test-Wail2banAdministrator)) { throw 'Cần quyền quản trị để chạy bảo vệ.' }
+if ($ManagedInstanceId) { $parsedInstance = [guid]::Empty; if (-not [guid]::TryParse($ManagedInstanceId, [ref]$parsedInstance)) { throw 'Mã phiên điều khiển không hợp lệ.' } }
+$lease = Enter-Wail2banProtectionLock
+try {
+    if (-not $lease.Owned) { throw 'Đã có phiên Wail2ban hoặc thao tác quản trị sở hữu khóa; không chạy trùng.' }
+    if (@(Get-Wail2banProtectionProcessRecords).Count -gt 0) { throw 'Có tiến trình bảo vệ khác chưa dừng; không khởi động thêm.' }
+    $state = New-Wail2banState -Whitelist $settings.Whitelist -SelfList (Get-Wail2banSelfAddresses) -LogPath (Join-Path $PSScriptRoot 'wail2ban_log.log') -HistoryPath (Join-Path $PSScriptRoot 'bannedIPLog.ini') -ConfigPath (Join-Path $PSScriptRoot 'wail2ban_config.ini') -ConfigLoadedAtUtc $configurationLoadedAtUtc
+    if ($ManagedInstanceId) { $state.InstanceId = $parsedInstance.ToString('D') }
+    Read-Wail2banBanHistory $state
+    Start-Wail2banLoop $state $settings $PSScriptRoot
+} finally { Exit-Wail2banProtectionLock $lease }

@@ -25,6 +25,37 @@ try {
     $now = [datetime]::UtcNow
     $state = New-Wail2banState -NowUtc $now
     $state.FirewallReadSucceeded = $true
+    Invoke-IntegrationCase 'whitelist screenshot syntax is rejected with line number' {
+        $configurationPath = Join-Path $temporaryRoot 'sample.ini'
+        $configuration = @('[Security]', '4625=RDP Logins', '[Whitelist]', '`192.168.4.96 = My Machine`', '`10.10.10.1 = My Machine 2`')
+        [io.file]::WriteAllLines($configurationPath, $configuration, (New-Object text.UTF8Encoding($true)))
+        $configurationError = $null
+        try { $null = Get-Wail2banConfiguration $configurationPath } catch { $configurationError = $_.Exception.Message }
+        Assert-Integration ($null -ne $configurationError -and $configurationError -match 'dòng 4' -and $configurationError -match 'backtick') 'Backtick mistake was not explained with line number.'
+    }
+    Invoke-IntegrationCase 'corrected whitelist is parsed into the runtime snapshot' {
+        $configurationPath = Join-Path $temporaryRoot 'sample.ini'
+        $configuration = @('[Security]', '4625=RDP Logins', '[Whitelist]', '192.168.4.96 = My Machine', '10.10.10.1 = My Machine 2', '203.0.113.0/24 = Company network')
+        [io.file]::WriteAllLines($configurationPath, $configuration, (New-Object text.UTF8Encoding($true)))
+        $settings = Get-Wail2banConfiguration $configurationPath
+        $loadedState = New-Wail2banState -NowUtc $now -Whitelist $settings.Whitelist -SelfList @('127.0.0.1','192.0.2.10') -ConfigPath $configurationPath -ConfigLoadedAtUtc $now
+        $loadedState.FirewallReadSucceeded = $true
+        $snapshot = New-Wail2banSnapshot $loadedState $now
+        Assert-Integration ($snapshot.Whitelist.Count -eq 3 -and $snapshot.Whitelist -contains '192.168.4.96' -and $snapshot.Whitelist -contains '10.10.10.1') 'Snapshot did not preserve the parsed whitelist.'
+        Assert-Integration ($snapshot.SelfList.Count -eq 2 -and $snapshot.ConfigPath -eq $configurationPath) 'Config source or local addresses were lost.'
+        Assert-Integration ((ConvertTo-Wail2banUtc $snapshot.ConfigLoadedAtUtc) -eq $now) 'Configuration load time was lost.'
+        Assert-Integration (Test-Wail2banWhitelist '192.168.4.96' $loadedState.Whitelist $loadedState.SelfList) 'First management address is not exempt.'
+        Assert-Integration (Test-Wail2banWhitelist '10.10.10.1' $loadedState.Whitelist $loadedState.SelfList) 'Second management address is not exempt.'
+        Publish-Wail2banStatus $loadedState $now $temporaryRoot
+        $readBack = Read-Wail2banSnapshot (Join-Path $temporaryRoot 'runtime\wail2ban_status.json')
+        Assert-Integration ($readBack.Whitelist.Count -eq 3 -and $readBack.SelfList.Count -eq 2) 'Whitelist was not persisted to the shared snapshot.'
+        $display = Get-Wail2banMonitorText $readBack $now
+        Assert-Integration ($display.Contains('192.168.4.96') -and $display.Contains('10.10.10.1') -and $display.Contains('203.0.113.0/24')) 'Monitor did not display the runtime whitelist.'
+        # Sua file khong duoc lam monitor nham rang tien trinh da nap cau hinh moi.
+        [io.file]::WriteAllLines($configurationPath, @('[Security]', '4625=RDP Logins', '[Whitelist]', '198.51.100.9 = Changed after startup'), (New-Object text.UTF8Encoding($true)))
+        $readBack = Read-Wail2banSnapshot (Join-Path $temporaryRoot 'runtime\wail2ban_status.json')
+        Assert-Integration ($readBack.Whitelist -notcontains '198.51.100.9' -and $readBack.Whitelist -contains '192.168.4.96') 'Monitor read unapplied configuration from disk.'
+    }
     Invoke-IntegrationCase 'core snapshot round trip and both monitor entrypoints' {
         Publish-Wail2banStatus -State $state -NowUtc $now -Root $temporaryRoot
         $statusPath = Join-Path $temporaryRoot 'runtime\wail2ban_status.json'
