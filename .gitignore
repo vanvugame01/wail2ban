@@ -1,0 +1,4 @@
+runtime/
+public_html/
+wail2ban_log.log
+bannedIPLog.ini
